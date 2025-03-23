@@ -6,6 +6,8 @@ library(sf)
 library(ggplot2)
 library(plotly)
 library(shinythemes)
+library(geosphere)
+
 
 # Interface utilisateur
 ui <- fluidPage(
@@ -125,7 +127,10 @@ server <- function(input, output, session) {
       df <- df %>%
          mutate(
             dist = c(0, sqrt(diff(lat)^2 + diff(lon)^2))*100,
-            dist_cumul = cumsum(dist)
+            diff_ele = c(0, sqrt(diff(elevation)^2)/1000),
+            dist_3d = dist + diff_ele,
+            dist_cumul = cumsum(dist),
+            dist_cumul_3d = cumsum(dist_3d)
          )
       
       # Convertir en objet sf (points)
@@ -151,7 +156,7 @@ server <- function(input, output, session) {
       denivele_negatif <- sum(pmin(0, diff(df$elevation)))
 
       # Distance totale
-      distance_totale <- max(df$dist_cumul)   # Convertir en kilomètres
+      distance_totale <- max(df$dist_cumul_3d)   # Convertir en kilomètres
 
       # Retourner les statistiques
       list(
@@ -165,10 +170,9 @@ server <- function(input, output, session) {
    output$statistiques <- renderPrint({
       stats <- calcul_statistiques()
       
-      dist <- sqrt((stats$distance_totale^2) + (sum(stats$denivele_positif + stats$denivele_negatif))^2 ) 
       cat("Dénivelé positif cumulé : ", round(stats$denivele_positif, 2), " m\n")
       cat("Dénivelé négatif cumulé : ", round(stats$denivele_negatif, 2), " m\n")
-      cat("Distance totale : ", round(dist, 2), " km\n")
+      cat("Distance totale : ", round(stats$distance_totale, 2), " km\n")
    })
    
    # Affichage de toutes les traces sur la carte Leaflet
