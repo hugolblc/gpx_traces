@@ -5,6 +5,6 @@ account: u6vr10-hugo-leblanc
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 14314575
-bundleId: 9988921
+bundleId: 10107350
 url: https://u6vr10-hugo-leblanc.shinyapps.io/app_traces/
 version: 1
