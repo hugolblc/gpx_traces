@@ -1,54 +1,13 @@
 library(shiny)
 library(leaflet)
-library(XML)
-library(tidyverse)
 library(sf)
 library(ggplot2)
 library(plotly)
 library(shinythemes)
 
-# ----------- Préchargement de toutes les traces GPX -----------
-# Lecture des fichiers GPX au démarrage de l'app
-chemins_gpx <- list.files("traces_gpx", pattern = "\\.gpx$", recursive = TRUE, full.names = TRUE)
-
-# Fonction pour lire un GPX de manière sécurisée
-lire_trace_gpx <- function(path) {
-  parts <- strsplit(path, .Platform$file.sep)[[1]]
-  localite <- parts[2]
-  activite <- parts[3]
-  nom_fichier <- basename(path)
-  
-  if (file.size(path) == 0) return(NULL)
-  
-  gpx_parsed <- tryCatch({
-    htmlTreeParse(file = path, useInternalNodes = TRUE)
-  }, error = function(e) return(NULL))
-  
-  if (is.null(gpx_parsed)) return(NULL)
-  
-  coords <- xpathSApply(doc = gpx_parsed, path = "//trkpt", fun = xmlAttrs)
-  if (length(coords) == 0) return(NULL)
-  
-  df <- data.frame(
-    lat = as.numeric(coords["lat", ]),
-    lon = as.numeric(coords["lon", ])
-  )
-  sf_points <- st_as_sf(df, coords = c("lon", "lat"), crs = 4326)
-  sf_line <- sf_points %>%
-    summarise(do_union = FALSE) %>%
-    st_cast("LINESTRING")
-  
-  list(
-    localite = localite,
-    activite = activite,
-    nom = nom_fichier,
-    path = path,
-    ligne = sf_line
-  )
-}
-
-base_traces <- lapply(chemins_gpx, lire_trace_gpx)
-base_traces <- Filter(Negate(is.null), base_traces)
+# ----------- Chargement des fichiers .rds -----------
+chemins_rds <- list.files("traces_rds", pattern = "\\.rds$", recursive = TRUE, full.names = TRUE)
+base_traces <- lapply(chemins_rds, readRDS)
 
 # ----------- UI -----------
 ui <- fluidPage(
@@ -74,7 +33,8 @@ ui <- fluidPage(
 
 # ----------- SERVER -----------
 server <- function(input, output, session) {
-  # Localités uniques
+  
+  # Initialisation des localités
   updateSelectInput(session, "localite", choices = unique(sapply(base_traces, `[[`, "localite")))
   
   observeEvent(input$localite, {
@@ -95,40 +55,7 @@ server <- function(input, output, session) {
   
   trace_selectionnee <- reactive({
     req(input$trace, traces_filtrees())
-    trace <- Filter(function(t) t$nom == input$trace, traces_filtrees())[[1]]
-    
-    gpx_parsed <- tryCatch({
-      htmlTreeParse(file = trace$path, useInternalNodes = TRUE)
-    }, error = function(e) return(NULL))
-    
-    if (is.null(gpx_parsed)) return(NULL)
-    
-    coords <- xpathSApply(doc = gpx_parsed, path = "//trkpt", fun = xmlAttrs)
-    elevation <- xpathSApply(doc = gpx_parsed, path = "//trkpt/ele", fun = xmlValue)
-    time <- xpathSApply(doc = gpx_parsed, path = "//trkpt/time", fun = xmlValue)
-    
-    df <- data.frame(
-      lat = as.numeric(coords["lat", ]),
-      lon = as.numeric(coords["lon", ]),
-      elevation = as.numeric(elevation),
-      time = as.POSIXct(time, format = "%Y-%m-%dT%H:%M:%SZ")
-    )
-    
-    df <- df %>%
-      mutate(
-        dist = c(0, sqrt(diff(lat)^2 + diff(lon)^2)) * 100,
-        diff_ele = c(0, sqrt(diff(elevation)^2) / 1000),
-        dist_3d = dist + diff_ele,
-        dist_cumul = cumsum(dist),
-        dist_cumul_3d = cumsum(dist_3d)
-      )
-    
-    sf_points <- st_as_sf(df, coords = c("lon", "lat"), crs = 4326)
-    sf_line <- sf_points %>%
-      summarise(do_union = FALSE) %>%
-      st_cast("LINESTRING")
-    
-    list(points = sf_points, line = sf_line)
+    Filter(function(t) t$nom == input$trace, traces_filtrees())[[1]]
   })
   
   # Carte leaflet
@@ -142,7 +69,7 @@ server <- function(input, output, session) {
         color = "black", weight = 3, group = "Toutes les traces"
       ) %>%
       addPolylines(
-        data = trace_selectionnee()$line,
+        data = trace_selectionnee()$ligne,
         color = "red", weight = 10, group = "Trace sélectionnée"
       ) %>%
       addLayersControl(
@@ -154,7 +81,6 @@ server <- function(input, output, session) {
   # Profil d'altitude
   output$profil_altitude <- renderPlotly({
     req(trace_selectionnee())
-    
     df <- st_drop_geometry(trace_selectionnee()$points)
     
     p <- ggplot(df, aes(x = dist_cumul, y = elevation)) +
@@ -188,16 +114,17 @@ server <- function(input, output, session) {
     cat("Distance totale : ", round(distance_totale, 2), " km\n")
   })
   
-  # Export
+  # Export GPX
   output$export <- downloadHandler(
     filename = function() {
       paste0(tools::file_path_sans_ext(input$trace), ".gpx")
     },
     content = function(file) {
-      st_write(trace_selectionnee()$line, file, driver = "GPX", delete_dsn = TRUE)
+      st_write(trace_selectionnee()$ligne, file, driver = "GPX", delete_dsn = TRUE)
     }
   )
 }
 
-# Lancer l'app
+# Lancer l'application
 shinyApp(ui = ui, server = server)
+
