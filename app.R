@@ -10,32 +10,60 @@ chemins_rds <- list.files("traces_rds", pattern = "\\.rds$", recursive = TRUE, f
 base_traces <- lapply(chemins_rds, readRDS)
 
 # ----------- UI -----------
-ui <- fluidPage(
-  theme = shinytheme("flatly"),
-  titlePanel("Visualisation des traces GPX par localité"),
-  sidebarLayout(
-    sidebarPanel(
-      selectInput("localite", "Choisir une localité", choices = NULL, width = "100%"),
-      selectInput("activite", "Choisir une activité", choices = NULL, width = "100%"),
-      uiOutput("trace_ui"),
-      downloadButton("export", "Exporter la trace sélectionnée", class = "btn-primary")
-    ),
-    mainPanel(
-      tabsetPanel(
-        tabPanel("Carte", 
-                 leafletOutput("map", height = "500px"),
-                 plotlyOutput("profil_altitude", height = "300px")),
-        tabPanel("Statistiques", verbatimTextOutput("statistiques"))
-      )
-    )
+ui <-
+  navbarPage(
+    
+    "Visualize & Download gpx", id = "nav", tabPanel("Interactive map",
+                                                     
+                                                     div(
+                                                       class = "outer",
+                                                       
+                                                       tags$head(# Include our custom CSS
+                                                         includeCSS("styles.css"), includeScript("gomap.js")),
+                                                       
+                                                       # If not using custom CSS, set height of leafletOutput to a number instead of percent
+                                                       leafletOutput("map", width = "100%", height = "100%"),
+                                                       
+                                                       # Shiny versions prior to 0.11 should use class = "modal" instead.
+                                                       absolutePanel(
+                                                         id = "controls",
+                                                         class = "panel panel-default",
+                                                         fixed = TRUE,
+                                                         draggable = TRUE,
+                                                         top = 60,
+                                                         left = 20,
+                                                         right = "auto",
+                                                         bottom = "auto",
+                                                         width = 500,
+                                                         height = "auto",
+                                                         
+                                                         selectInput(
+                                                           "localite",
+                                                           "Choisir une localité",
+                                                           choices = NULL,
+                                                           width = "100%"
+                                                         ),
+                                                         selectInput(
+                                                           "activite",
+                                                           "Choisir une activité",
+                                                           choices = NULL,
+                                                           width = "100%"
+                                                         ),
+                                                         uiOutput("trace_ui"),
+                                                         downloadButton("export", "Exporter la trace sélectionnée", class = "btn-primary"),
+                                                         plotlyOutput("profil_altitude", height = "300px")
+                                                       ),
+                                                     )), tabPanel("Data explorer",
+                                                                  tabPanel("Statistiques", verbatimTextOutput("statistiques")))
+    
   )
-)
+
 
 # ----------- SERVER -----------
 server <- function(input, output, session) {
   
   # Initialisation des localités
-  updateSelectInput(session, "localite", choices = unique(sapply(base_traces, `[[`, "localite")))
+  updateSelectInput(session, "localite", choices = sort(unique(sapply(base_traces, `[[`, "localite"))))
   
   observeEvent(input$localite, {
     activites <- unique(sapply(Filter(function(t) t$localite == input$localite, base_traces), `[[`, "activite"))
@@ -64,9 +92,11 @@ server <- function(input, output, session) {
     
     leaflet() %>%
       addTiles() %>%
+      addProviderTiles(providers$Esri.WorldImagery, group = "Esri World Imagery") %>%
       addPolylines(
         data = do.call(rbind, lapply(traces_filtrees(), function(t) t$ligne)),
         color = "black", weight = 3, group = "Toutes les traces"
+        
       ) %>%
       addPolylines(
         data = trace_selectionnee()$ligne,
@@ -74,8 +104,20 @@ server <- function(input, output, session) {
       ) %>%
       addLayersControl(
         overlayGroups = c("Toutes les traces", "Trace sélectionnée"),
+        baseGroups = c("Esri World Imager", "OSM"),
         options = layersControlOptions(collapsed = FALSE)
       )
+    
+    # leaflet() %>%
+    #   addTiles() %>%
+    #   addPolylines(
+    #     data = trace_selectionnee()$ligne,
+    #     color = "blue",
+    #     weight = 5,
+    #     opacity = 0.7,
+    #     dashArray = "5,10",
+    #     popup = ~paste("Nom:", trace_selectionnee()$nom, "<br>", "Distance:", round(max(st_drop_geometry(trace_selectionnee()$points)$dist_cumul_3d), 2), "km")
+    #   )
   })
   
   # Profil d'altitude
